@@ -1,62 +1,71 @@
 import os
-import asyncio
 import random
+import asyncio
+import httpx
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-from httpx import AsyncClient
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_ID = os.getenv("CHANNEL_ID")
+CHANNEL_ID = os.getenv("CHANNEL_ID")  # مثال: "@your_channel" أو ID رقمي
 
-# قائمة بالسور وأسمائها وأصواتها (بصوت هيثم الدخين)
-surahs = [
-    {"name": "الفاتحة", "url": "https://server.mp3quran.net/haitham/001.mp3"},
-    {"name": "البقرة", "url": "https://server.mp3quran.net/haitham/002.mp3"},
-    {"name": "آل عمران", "url": "https://server.mp3quran.net/haitham/003.mp3"},
-    # أكمل باقي السور إذا أردت
-]
+API_URL = "https://api.quran.com:443/v4/chapters"
 
-async def send_random_surah(application):
-    while True:
-        surah = random.choice(surahs)
-        try:
-            await application.bot.send_audio(
-                chat_id=CHANNEL_ID,
-                audio=surah["url"],
-                caption=f"📖 {surah['name']}\n🎙️ القارئ: هيثم الدخين"
-            )
-        except Exception as e:
-            print("خطأ في الإرسال:", e)
-        await asyncio.sleep(300)  # كل 5 دقائق
-
-# أوامر البوت
-
+# أمر البدء
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("أهلاً بك في بوت القرآن الكريم 🎧")
+    await update.message.reply_text("أهلاً بك في بوت القرآن الكريم 🎧.\nاكتب /random للحصول على سورة عشوائية.")
 
-async def random_surah(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    surah = random.choice(surahs)
-    await update.message.reply_audio(
-        audio=surah["url"],
-        caption=f"📖 {surah['name']}\n🎙️ القارئ: هيثم الدخين"
-    )
-
+# أمر البينق
 async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("✅ البوت شغال!")
+    await update.message.reply_text("البوت يعمل ✅")
 
+# جلب سورة عشوائية من API
+async def get_random_surah():
+    async with httpx.AsyncClient() as client:
+        response = await client.get(API_URL)
+        data = response.json()
+        chapters = data.get("chapters", [])
+        if chapters:
+            return random.choice(chapters)
+    return None
+
+# إرسال سورة عشوائية
+async def random_surah(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    surah = await get_random_surah()
+    if surah:
+        name = surah["name_arabic"]
+        translated = surah["name_simple"]
+        number = surah["id"]
+        message = f"📖 سورة {name} ({translated}) - رقم {number}"
+        await update.message.reply_text(message)
+    else:
+        await update.message.reply_text("تعذر جلب سورة حالياً، حاول لاحقاً.")
+
+# إرسال تلقائي كل 6 ساعات
+async def send_random_surah(app):
+    while True:
+        surah = await get_random_surah()
+        if surah:
+            name = surah["name_arabic"]
+            translated = surah["name_simple"]
+            number = surah["id"]
+            message = f"📖 سورة {name} ({translated}) - رقم {number}"
+            await app.bot.send_message(chat_id=CHANNEL_ID, text=message)
+        await asyncio.sleep(6 * 60 * 60)  # كل 6 ساعات
+
+# نقطة البداية
 async def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # أوامر المستخدم
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("random", random_surah))
     app.add_handler(CommandHandler("ping", ping))
 
-    # بدء مهمة إرسال السور كل 5 دقائق
+    # إرسال تلقائي بالخلفية
     app.create_task(send_random_surah(app))
 
-    print("🤖 البوت يعمل الآن...")
+    print("✅ البوت يعمل الآن...")
     await app.run_polling()
 
+# تشغيل
 if __name__ == "__main__":
     asyncio.run(main())
